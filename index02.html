@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#101820">
+<title>MTB Downhill — Prototipo 0.2</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101820;color:#f4f7fa;font-family:system-ui,-apple-system,Segoe UI,sans-serif;touch-action:none}
+canvas{display:block;width:100vw;height:100dvh}
+#hud{position:fixed;inset:12px 12px auto;display:flex;gap:8px;align-items:flex-start;pointer-events:none}
+.pill{background:#071018cc;border:1px solid #ffffff24;border-radius:12px;padding:8px 11px;font-size:12px;backdrop-filter:blur(8px)}
+.pill b{display:block;font-size:19px;line-height:1.15;font-variant-numeric:tabular-nums}
+#topright{margin-left:auto;display:flex;gap:7px;pointer-events:auto}
+button{border:1px solid #ffffff44;border-radius:12px;background:#172632;color:#fff;padding:10px 12px;font-weight:650}
+#help{position:fixed;left:50%;top:72px;transform:translateX(-50%);width:min(92vw,430px);text-align:center;background:#071018d9;border:1px solid #ffffff24;border-radius:14px;padding:10px 13px;font-size:12px;line-height:1.45;pointer-events:none}
+#controls{position:fixed;left:0;right:0;bottom: max(12px,env(safe-area-inset-bottom));display:flex;justify-content:space-between;gap:12px;padding:0 14px;align-items:end}
+.brake{width:min(31vw,150px);height:94px;border:2px solid #ffffff65;border-radius:18px;background:#16334ddd;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;user-select:none;-webkit-user-select:none;touch-action:none;box-shadow:0 5px 22px #0008}
+.brake.rear{background:#25452fdd}
+.brake.active{filter:brightness(1.5);transform:scale(.97);border-color:white}
+.brake small{font-size:11px;opacity:.85}.brake strong{font-size:17px}.bar{width:75%;height:7px;background:#ffffff35;border-radius:8px;overflow:hidden}.bar i{display:block;height:100%;width:0;background:#fff;border-radius:8px}
+#steer{position:fixed;bottom:120px;left:50%;transform:translateX(-50%);font-size:11px;color:#fff;background:#07101899;padding:5px 9px;border-radius:9px;pointer-events:none}
+#message{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);background:#08131deF;border:1px solid #ffffff44;border-radius:18px;padding:20px;width:min(88vw,380px);text-align:center;box-shadow:0 15px 60px #0009}
+#message h1{font-size:22px;margin:0 0 8px}#message p{font-size:13px;line-height:1.5;color:#d1dce5}
+#message button{background:#e4f0f7;color:#101820;border:0;padding:12px 18px;font-size:14px}
+#calibrate{position:fixed;right:14px;top:66px;pointer-events:auto}
+#sensorStatus{position:fixed;left:50%;bottom:102px;transform:translateX(-50%);font-size:10px;color:#fff;background:#071018bb;padding:5px 8px;border-radius:8px;pointer-events:none;white-space:nowrap}
+#rotate{display:none;position:fixed;z-index:20;inset:0;background:#101820f5;align-items:center;justify-content:center;text-align:center;padding:24px}
+#rotate .panel{max-width:360px;background:#172632;border:1px solid #ffffff35;border-radius:18px;padding:22px}
+#rotate .symbol{font-size:48px}
+#rotate button{background:#e4f0f7;color:#101820;border:0;margin-top:8px}
+@media (orientation:portrait){
+ #rotate{display:flex}
+ #hud,#help,#controls,#calibrate,#steer,#sensorStatus,#message{display:none!important}
+}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+  <div class="pill">VELOCIDAD<b><span id="speed">0</span> km/h</b></div>
+  <div class="pill">PENDIENTE<b><span id="grade">-8</span>%</b></div>
+  <div class="pill">DIRECCIÓN<b><span id="steerv">0</span>°</b></div>
+  <div id="topright"><button id="gyro">Activar giroscopio</button><button id="landscape">Horizontal</button></div>
+</div>
+<div id="help">Inclina el móvil a izquierda/derecha para dirigir. Mantén pulsados los frenos para aumentar la presión progresivamente.</div>
+<button id="calibrate">Centrar</button>
+<div id="steer">Dirección: inclinación del móvil · calibra con el teléfono quieto</div><div id="sensorStatus">Sensor: sin datos</div>
+<div id="controls">
+  <button class="brake" id="front"><small>FRENO DELANTERO</small><strong>IZQUIERDA</strong><div class="bar"><i></i></div></button>
+  <button class="brake rear" id="rear"><small>FRENO TRASERO</small><strong>DERECHA</strong><div class="bar"><i></i></div></button>
+</div>
+<div id="message">
+  <h1>MTB DOWNHILL 0.2</h1>
+  <p>Prototipo optimizado para jugar en horizontal. Gira el móvil, activa el giroscopio y calibra la dirección antes de empezar.</p>
+  <button id="start">Empezar descenso</button>
+</div>
+<div id="rotate"><div class="panel"><div class="symbol">📱 ↻</div><h2>Gira el móvil en horizontal</h2><p>Este juego está diseñado para jugar apaisado. Si no gira automáticamente, gira el teléfono manualmente.</p><button id="tryLandscape">Intentar modo horizontal</button></div></div>
+<script>
+(() => {
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const $=id=>document.getElementById(id);
+let W=innerWidth,H=innerHeight,dpr=Math.min(devicePixelRatio||1,2);
+function resize(){W=innerWidth;H=innerHeight;canvas.width=W*dpr;canvas.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}
+addEventListener('resize',resize);resize();
+let running=false,gyroOn=false,neutralGamma=0,gamma=0,steer=0,speed=0,dist=0,elapsed=0;
+let frontHeld=0,rearHeld=0,frontDown=false,rearDown=false;
+let last=performance.now(),crashFlash=0,roadOffset=0;
+const maxSpeed=68; // km/h
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,t)=>a+(b-a)*t;
+function holdButton(id,which){
+ const el=$(id);
+ const down=e=>{e.preventDefault();if(which==='front')frontDown=true;else rearDown=true;el.classList.add('active');try{el.setPointerCapture(e.pointerId)}catch(_){}};
+ const up=e=>{e.preventDefault();if(which==='front')frontDown=false;else rearDown=false;el.classList.remove('active')};
+ el.addEventListener('pointerdown',down);['pointerup','pointercancel','lostpointercapture','pointerleave'].forEach(ev=>el.addEventListener(ev,up));
+}
+holdButton('front','front');holdButton('rear','rear');
+const keys={};addEventListener('keydown',e=>{keys[e.key]=true});addEventListener('keyup',e=>{keys[e.key]=false});
+let neutralAxis=0,rawAxis=0,hasSensorData=false;
+function currentScreenAngle(){
+  if(screen.orientation && typeof screen.orientation.angle==='number') return ((screen.orientation.angle%360)+360)%360;
+  return ((window.orientation||0)%360+360)%360;
+}
+function readHorizontalTilt(e){
+  const angle=currentScreenAngle();
+  // Use the device axis that corresponds to left/right in the current screen orientation.
+  if(angle===90) return e.beta ?? 0;
+  if(angle===270) return -(e.beta ?? 0);
+  if(angle===180) return -(e.gamma ?? 0);
+  return e.gamma ?? 0;
+}
+function onDeviceOrientation(e){
+  if(e.gamma===null && e.beta===null) return;
+  rawAxis=readHorizontalTilt(e);
+  hasSensorData=true;
+  $('sensorStatus').textContent='Sensor: '+rawAxis.toFixed(1)+'°';
+}
+$('calibrate').onclick=()=>{
+  neutralAxis=rawAxis;
+  $('sensorStatus').textContent='Centro calibrado · '+neutralAxis.toFixed(1)+'°';
+};
+async function requestLandscape(){
+  try{
+    if(!document.fullscreenElement && document.documentElement.requestFullscreen)
+      await document.documentElement.requestFullscreen();
+    if(screen.orientation && screen.orientation.lock)
+      await screen.orientation.lock('landscape');
+    $('sensorStatus').textContent='Modo horizontal solicitado';
+  }catch(err){
+    $('sensorStatus').textContent='Gira el móvil manualmente para jugar en horizontal';
+  }
+}
+$('landscape').onclick=requestLandscape;
+$('tryLandscape').onclick=requestLandscape;
+$('gyro').onclick=async()=>{
+  try{
+    if(typeof DeviceOrientationEvent==='undefined'){
+      $('gyro').textContent='Sensor no compatible';
+      $('sensorStatus').textContent='Este navegador no ofrece sensor de orientación';
+      return;
+    }
+    if(typeof DeviceOrientationEvent.requestPermission==='function'){
+      const permission=await DeviceOrientationEvent.requestPermission();
+      if(permission!=='granted'){
+        $('sensorStatus').textContent='Permiso de movimiento denegado';
+        return;
+      }
+    }
+    window.addEventListener('deviceorientation',onDeviceOrientation,true);
+    gyroOn=true;
+    $('gyro').textContent='Giroscopio activo';
+    $('gyro').style.background='#245b3b';
+    $('sensorStatus').textContent='Esperando datos del giroscopio…';
+    setTimeout(()=>{
+      if(!hasSensorData) $('sensorStatus').textContent='No llegan datos: revisa permisos del sitio';
+      else $('sensorStatus').textContent='Sensor conectado · pulsa Centrar';
+    },1500);
+  }catch(err){
+    $('gyro').textContent='Error de sensor';
+    $('sensorStatus').textContent='Error: '+(err.message||'no se pudo activar');
+  }
+};
+$('start').onclick=()=>{$('message').style.display='none';running=true;last=performance.now();};
+function roadCurve(z){return Math.sin(z*.0011)*.72+Math.sin(z*.00037+1.7)*.48+Math.sin(z*.0024)*.12}
+function draw(){
+ const sky=ctx.createLinearGradient(0,0,0,H*.58);sky.addColorStop(0,'#7ea1b0');sky.addColorStop(1,'#d0d5c7');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+ // distant hills
+ ctx.fillStyle='#657b68';ctx.beginPath();ctx.moveTo(0,H*.48);
+ for(let x=0;x<=W;x+=12){let y=H*.39+Math.sin(x*.009+dist*.00008)*H*.055+Math.sin(x*.021)*H*.018;ctx.lineTo(x,y)}
+ ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.fill();
+ // road perspective strips
+ const horizon=H*.43, bottom=H*1.05, vanX=W*.5-steer*W*.08;
+ for(let i=0;i<48;i++){
+  let t=i/48, t2=(i+1)/48;
+  let y1=horizon+(bottom-horizon)*t*t, y2=horizon+(bottom-horizon)*t2*t2;
+  let z1=dist+(1-t)*950,z2=dist+(1-t2)*950;
+  let c1=roadCurve(z1),c2=roadCurve(z2);
+  let half1=(W*.035)+(W*.49)*t,half2=(W*.035)+(W*.49)*t2;
+  let x1=vanX+c1*W*.19*t,x2=vanX+c2*W*.19*t2;
+  ctx.fillStyle=(i%2?'#686d61':'#73786a');
+  ctx.beginPath();ctx.moveTo(x1-half1,y1);ctx.lineTo(x1+half1,y1);ctx.lineTo(x2+half2,y2);ctx.lineTo(x2-half2,y2);ctx.closePath();ctx.fill();
+  // trail edges
+  ctx.strokeStyle='#b8b29a';ctx.lineWidth=2+t*5;ctx.beginPath();ctx.moveTo(x1-half1,y1);ctx.lineTo(x2-half2,y2);ctx.moveTo(x1+half1,y1);ctx.lineTo(x2+half2,y2);ctx.stroke();
+  // simple stones/roots
+  if(i%5===0 && t>.35){ctx.fillStyle='#4b5149';ctx.beginPath();ctx.ellipse(x2+Math.sin(i*12+dist*.01)*half2*.58,y2-2,3+t*10,2+t*4,.2,0,Math.PI*2);ctx.fill()}
+ }
+ // cockpit
+ ctx.save();ctx.translate(W/2,H*.83);ctx.rotate(-steer*.012);
+ ctx.strokeStyle='#161e22';ctx.lineWidth=Math.max(8,W*.018);ctx.lineCap='round';ctx.beginPath();ctx.moveTo(-W*.31,0);ctx.quadraticCurveTo(0,-H*.04,W*.31,0);ctx.stroke();
+ ctx.strokeStyle='#a7afb0';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-W*.31,0);ctx.lineTo(-W*.36,-H*.012);ctx.moveTo(W*.31,0);ctx.lineTo(W*.36,-H*.012);ctx.stroke();
+ ctx.fillStyle='#242d31';ctx.fillRect(-W*.045,-H*.05,W*.09,H*.035);
+ ctx.fillStyle='#d0d5d0';ctx.fillRect(-W*.018,-H*.09,W*.036,H*.055);
+ // fork hints
+ ctx.strokeStyle='#303b40';ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(-W*.055,-H*.01);ctx.lineTo(-W*.035,H*.15);ctx.moveTo(W*.055,-H*.01);ctx.lineTo(W*.035,H*.15);ctx.stroke();
+ ctx.restore();
+ // vibration / speed lines
+ if(speed>28){ctx.strokeStyle='#ffffff22';ctx.lineWidth=1;for(let i=0;i<8;i++){let x=(i/8)*W;ctx.beginPath();ctx.moveTo(x,H*.58);ctx.lineTo(x+(x-W/2)*.08,H*.68);ctx.stroke()}}
+}
+function update(dt){
+ elapsed+=dt;
+ // sensor steering plus keyboard backup
+ let target=0;
+ if(gyroOn && hasSensorData){
+   let delta=rawAxis-neutralAxis;
+   // Dead zone plus symmetric response avoids drift and unequal steering around the centre.
+   if(Math.abs(delta)<2) delta=0;
+   else delta-=Math.sign(delta)*2;
+   target=clamp(delta/22,-1,1);
+ }
+ if(keys.ArrowLeft||keys.a)target=-1;if(keys.ArrowRight||keys.d)target=1;
+ steer=lerp(steer,target,1-Math.exp(-dt*5.5));
+ // Hold ramps smoothly to max over 1.1s
+ frontHeld=frontDown?clamp(frontHeld+dt/1.1,0,1):Math.max(0,frontHeld-dt*3.2);
+ rearHeld=rearDown?clamp(rearHeld+dt/1.1,0,1):Math.max(0,rearHeld-dt*3.2);
+ $('front').querySelector('i').style.width=(frontHeld*100)+'%';
+ $('rear').querySelector('i').style.width=(rearHeld*100)+'%';
+ // Physics: downhill gravity, rolling drag, independent brake contributions.
+ // Front brake stronger; rear brake has a little less deceleration and more slip tendency.
+ const grade=8+Math.sin(dist*.0017)*2.1+Math.sin(dist*.00043)*1.3;
+ const gravityAccel=9.81*(grade/100)*3.6; // km/h per second, scaled for prototype
+ const drag=.018*speed+.00065*speed*speed;
+ const frontDecel=frontHeld*15.5, rearDecel=rearHeld*10.5;
+ const braking=frontDecel+rearDecel;
+ speed=clamp(speed+(gravityAccel-drag-braking)*dt,0,maxSpeed);
+ // steering follows speed and trail curve; lateral line is a soft virtual boundary
+ const curve=roadCurve(dist+70);
+ const lateral=steer*(.65+speed/55);
+ const relative=lateral-curve*.36;
+ if(Math.abs(relative)>1.03){speed=Math.max(0,speed-12*dt);crashFlash=.18}
+ dist+=speed/3.6*dt*1.8;
+ $('speed').textContent=Math.round(speed);
+ $('grade').textContent=Math.round(grade);
+ $('steerv').textContent=Math.round(steer*28);
+ crashFlash=Math.max(0,crashFlash-dt);
+ if(crashFlash>0){ctx.fillStyle=`rgba(210,55,35,${crashFlash*1.4})`;ctx.fillRect(0,0,W,H)}
+}
+function loop(now){let dt=Math.min((now-last)/1000,.04);last=now;if(running){update(dt)}draw();requestAnimationFrame(loop)}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
